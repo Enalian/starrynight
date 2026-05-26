@@ -195,7 +195,7 @@ tbody tr {
 
 .fi-main {
     position: relative;
-    z-index: 10;
+    z-index: 20;
 }
 
 .fi-ta-filters .fi-dropdown-panel,
