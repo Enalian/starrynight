@@ -1,23 +1,23 @@
 {
-    "id": "starrynight",
-    "name": "StarryNight",
-    "author": "JoanFo",
-    "version": "1.0.0",
-    "description": "Who doesn't like the night, with flickering stars?",
-    "category": "theme",
-    "url": "https://github.com/JoanFo1456/starrynight",
-    "update_url": "",
-    "namespace": "JoanFo\\StarryNight",
-    "class": "StarryNightPlugin",
-    "panels": [
-        "admin",
-        "server",
-        "app"
-    ],
-    "panel_version": null,
-    "composer_packages": null,
-    "meta": {
-        "status": "not_installed",
-        "status_message": null
-    }
+  "id": "starrynight",
+  "name": "StarryNight",
+  "author": "JoanFo",
+  "version": "1.0.1",
+  "description": "Who doesn't like the night, with flickering stars?",
+  "category": "theme",
+  "url": "https://github.com/JoanFo1456/starrynight",
+  "update_url": "",
+  "namespace": "JoanFo\\StarryNight",
+  "class": "StarryNightPlugin",
+  "panels": [
+    "admin",
+    "server",
+    "app"
+  ],
+  "panel_version": null,
+  "composer_packages": null,
+  "meta": {
+    "status": "not_installed",
+    "status_message": null
+  }
 }
