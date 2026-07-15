@@ -2,17 +2,99 @@
 
 namespace JoanFo\StarryNight;
 
+use App\Contracts\Plugins\HasPluginSettings;
+use App\Traits\EnvironmentWriterTrait;
 use Filament\Contracts\Plugin;
+use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
+use Filament\Forms\Components\ColorPicker;
+use Filament\Forms\Components\Select;
+use Filament\Schemas\Components\Section;
+use Filament\Notifications\Notification;
 use Filament\Panel;
 use Filament\Support\Colors\Color;
 use Illuminate\Support\Facades\File;
 
-class StarryNightPlugin implements Plugin
+class StarryNightPlugin implements Plugin, HasPluginSettings
 {
+    use EnvironmentWriterTrait;
+
     public function getId(): string
     {
         return 'starrynight';
     }
+
+    public function getSettingsForm(): array
+    {
+        return [
+            Section::make('Визуал и Производительность')
+                ->description('Настройте внешний вид темы. Отключение метеоритов и снижение количества звезд повысит FPS на слабых ПК.')
+                ->schema([
+                    Toggle::make('enable_meteors')
+                        ->label('Включить падающие метеориты')
+                        ->default(fn () => config('starrynight.enable_meteors') === 'true' || config('starrynight.enable_meteors') === true)
+                        ->columnSpanFull(),
+
+                    ColorPicker::make('star_color')
+                        ->label('Цвет звезд')
+                        ->default(fn () => config('starrynight.star_color', '#ffffff')),
+
+                    Select::make('flicker_speed')
+                        ->label('Скорость мерцания')
+                        ->options([
+                            '5000' => 'Медленно (5 сек)',
+                            '3000' => 'Нормально (3 сек)',
+                            '1000' => 'Быстро (1 сек)',
+                        ])
+                        ->default(fn () => config('starrynight.flicker_speed', '3000')),
+
+                    TextInput::make('total_stars')
+                        ->label('Общее количество звезд')
+                        ->numeric()
+                        ->required()
+                        ->default(fn () => config('starrynight.total_stars', 75)),
+
+                    TextInput::make('flicker_count')
+                        ->label('Количество мерцающих звезд')
+                        ->numeric()
+                        ->required()
+                        ->default(fn () => config('starrynight.flicker_count', 15)),
+
+                    TextInput::make('background_image')
+                        ->label('Ссылка на фоновое изображение')
+                        ->helperText('Вставьте прямую ссылку на .jpg или .png (например, с Imgur). Оставьте пустым для градиента темы.')
+                        ->url()
+                        ->nullable(),
+
+                    TextInput::make('background_blur')
+                        ->label('Размытие фона (px)')
+                        ->numeric()
+                        ->default(5)
+                        ->helperText('Введите значение от 0 до 50'),
+                ])->columns(2)
+        ];
+    }
+
+    public function saveSettings(array $data): void
+    {
+        $this->writeToEnvironment([
+            'STARRYNIGHT_ENABLE_METEORS'   => $data['enable_meteors'] ? 'true' : 'false',
+            'STARRYNIGHT_STAR_COLOR'       => $data['star_color'],
+            'STARRYNIGHT_FLICKER_SPEED'    => $data['flicker_speed'],
+            'STARRYNIGHT_TOTAL_STARS'      => $data['total_stars'],
+            'STARRYNIGHT_FLICKER_COUNT'    => $data['flicker_count'],
+            'STARRYNIGHT_BACKGROUND_IMAGE' => $data['background_image'] ?? '',
+            'STARRYNIGHT_BACKGROUND_BLUR'  => $data['background_blur'] ?? '0',
+        ]);
+
+        Notification::make()
+            ->success()
+            ->title('Настройки сохранены')
+            ->body('Перезагрузите страницу для окончательного применения настроек.')
+            ->send();
+    }
+
+    public function boot(Panel $panel): void {}
 
     public function register(Panel $panel): void
     {
@@ -35,14 +117,16 @@ class StarryNightPlugin implements Plugin
             }
         }
 
-        $panel->colors([
-            'danger' => Color::Rose,
-            'gray' => Color::Slate,
-            'info' => Color::Pink,
-            'primary' => Color::Purple,
-            'success' => Color::Emerald,
-            'warning' => Color::Amber,
-        ]);
+        $panel
+            ->font('Jura')
+            ->colors([
+                'danger' => Color::Rose,
+                'gray' => Color::Slate,
+                'info' => Color::Pink,
+                'primary' => Color::hex('#1E90FF'),
+                'success' => Color::Emerald,
+                'warning' => Color::Amber,
+            ]);
 
         $panel->renderHook('panels::head.end', function () {
             $dark = asset('plugins/starrynight/css/starry-night.css');
@@ -145,58 +229,92 @@ HTML;
         });
 
         $panel->renderHook('panels::body.start', function () {
-            $meteorHtml = '<section class="starrynight-meteors">
-                <span></span>
-                <span></span>
-                <span></span>
-                <span></span>
-                <span></span>
-                <span></span>
-                <span></span>
-                <span></span>
-                <span></span>
-                <span></span>
-            </section>';
-            $meteorCss = <<<'CSS'
+            $totalStars = config('starrynight.total_stars', 75);
+            $flickerCount = config('starrynight.flicker_count', 15);
+            $enableMeteors = config('starrynight.enable_meteors', 'true');
+            $starColor = config('starrynight.star_color', '#ffffff');
+            $flickerSpeed = config('starrynight.flicker_speed', '3000');
+            $bgUrl = config('starrynight.background_image', '');
+            $blur = config('starrynight.background_blur', '0');
+
+            $bgCss = '';
+            if (!empty($bgUrl)) {
+                $bgCss = <<<CSS
+                <style>
+                body::before {
+                    content: "";
+                    position: fixed;
+                    top: 0; left: 0; width: 100%; height: 100%;
+                    background-image: url('{$bgUrl}');
+                    background-size: cover;
+                    background-position: center;
+                    filter: blur({$blur}px);
+                    z-index: -1;
+                    pointer-events: none;
+                }
+                </style>
+CSS;
+            }
+
+            $customSettingsCss = <<<CSS
             <style>
-            .starrynight-meteors { position: absolute; top: 0; left: 0; width: 100%; height: 100vh; pointer-events: none; z-index: 2; overflow: hidden; }
-            .starrynight-meteors span { position: absolute; top: 50%; left: 50%; width: 4px; height: 4px; background: var(--sn-meteor-color, #fff); border-radius: 50%; box-shadow: 0 0 0 4px var(--sn-star-glow, rgba(255,255,255,0.1)),0 0 0 8px var(--sn-star-glow, rgba(255,255,255,0.1)),0 0 20px var(--sn-star-glow, rgba(255,255,255,0.1)); animation: animate 3s linear infinite; }
-            .starrynight-meteors span::before { content: ""; position: absolute; top: 50%; transform: translateY(-50%); width: 300px; height: 1px; background: linear-gradient(90deg,var(--sn-star-trail-color, #fff),transparent); }
-            @keyframes animate { 0% { transform: rotate(315deg) translateX(0); opacity: 1; } 70% { opacity: 1; } 100% { transform: rotate(315deg) translateX(-1000px); opacity: 0; } }
-            .starrynight-meteors span:nth-child(1) { top: 0; right: 0; left: initial; animation-delay: 0s; animation-duration: 1s; }
-            .starrynight-meteors span:nth-child(2) { top: 0; right: 80px; left: initial; animation-delay: 0.2s; animation-duration: 3s; }
-            .starrynight-meteors span:nth-child(3) { top: 80px; right: 0px; left: initial; animation-delay: 0.4s; animation-duration: 2s; }
-            .starrynight-meteors span:nth-child(4) { top: 0; right: 180px; left: initial; animation-delay: 0.6s; animation-duration: 1.5s; }
-            .starrynight-meteors span:nth-child(5) { top: 0; right: 400px; left: initial; animation-delay: 0.8s; animation-duration: 2.5s; }
-            .starrynight-meteors span:nth-child(6) { top: 0; right: 600px; left: initial; animation-delay: 1s; animation-duration: 3s; }
-            .starrynight-meteors span:nth-child(7) { top: 300px; right: 0px; left: initial; animation-delay: 1.2s; animation-duration: 1.75s; }
-            .starrynight-meteors span:nth-child(8) { top: 0px; right: 700px; left: initial; animation-delay: 1.4s; animation-duration: 1.25s; }
-            .starrynight-meteors span:nth-child(9) { top: 0px; right: 1000px; left: initial; animation-delay: 0.75s; animation-duration: 2.25s; }
-            .starrynight-meteors span:nth-child(10) { top: 0px; right: 450px; left: initial; animation-delay: 2.75s; animation-duration: 2.75s; }
+                :root {
+                    --sn-star-color: {$starColor} !important;
+                }
             </style>
             CSS;
+
+            $meteorHtml = '';
+            $meteorCss = '';
+            
+            if ($enableMeteors === true || $enableMeteors === 'true' || $enableMeteors === '1') {
+                $meteorHtml = '<section class="starrynight-meteors">
+                    <span></span><span></span><span></span><span></span><span></span>
+                    <span></span><span></span><span></span><span></span><span></span>
+                </section>';
+                $meteorCss = <<<'CSS'
+                <style>
+                .starrynight-meteors { position: absolute; top: 0; left: 0; width: 100%; height: 100vh; pointer-events: none; z-index: 2; overflow: hidden; }
+                .starrynight-meteors span { position: absolute; top: 50%; left: 50%; width: 4px; height: 4px; background: var(--sn-meteor-color, #fff); border-radius: 50%; box-shadow: 0 0 0 4px var(--sn-star-glow, rgba(255,255,255,0.1)),0 0 0 8px var(--sn-star-glow, rgba(255,255,255,0.1)),0 0 20px var(--sn-star-glow, rgba(255,255,255,0.1)); animation: animate 3s linear infinite; }
+                .starrynight-meteors span::before { content: ""; position: absolute; top: 50%; transform: translateY(-50%); width: 300px; height: 1px; background: linear-gradient(90deg,var(--sn-star-trail-color, #fff),transparent); }
+                @keyframes animate { 0% { transform: rotate(315deg) translateX(0); opacity: 1; } 70% { opacity: 1; } 100% { transform: rotate(315deg) translateX(-1000px); opacity: 0; } }
+                .starrynight-meteors span:nth-child(1) { top: 0; right: 0; left: initial; animation-delay: 0s; animation-duration: 1s; }
+                .starrynight-meteors span:nth-child(2) { top: 0; right: 80px; left: initial; animation-delay: 0.2s; animation-duration: 3s; }
+                .starrynight-meteors span:nth-child(3) { top: 80px; right: 0px; left: initial; animation-delay: 0.4s; animation-duration: 2s; }
+                .starrynight-meteors span:nth-child(4) { top: 0; right: 180px; left: initial; animation-delay: 0.6s; animation-duration: 1.5s; }
+                .starrynight-meteors span:nth-child(5) { top: 0; right: 400px; left: initial; animation-delay: 0.8s; animation-duration: 2.5s; }
+                .starrynight-meteors span:nth-child(6) { top: 0; right: 600px; left: initial; animation-delay: 1s; animation-duration: 3s; }
+                .starrynight-meteors span:nth-child(7) { top: 300px; right: 0px; left: initial; animation-delay: 1.2s; animation-duration: 1.75s; }
+                .starrynight-meteors span:nth-child(8) { top: 0px; right: 700px; left: initial; animation-delay: 1.4s; animation-duration: 1.25s; }
+                .starrynight-meteors span:nth-child(9) { top: 0px; right: 1000px; left: initial; animation-delay: 0.75s; animation-duration: 2.25s; }
+                .starrynight-meteors span:nth-child(10) { top: 0px; right: 450px; left: initial; animation-delay: 2.75s; animation-duration: 2.75s; }
+                </style>
+CSS;
+            }
+
             $starDiv = '<div id="starrynight-stars" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3;"></div>';
             $starStyle = <<<'CSS'
-<style>
-.static-star, .flickering-star {
-    transition: opacity 1.2s cubic-bezier(0.4,0,0.2,1), filter 1.2s cubic-bezier(0.4,0,0.2,1);
-    background: var(--sn-star-color, #fff);
-}
-.static-star {
-    opacity: 0.8;
-    filter: brightness(1);
-}
-.flickering-star {
-    opacity: 1;
-    filter: brightness(1.7) drop-shadow(0 0 6px var(--sn-star-color, #fff));
-}
-</style>
+            <style>
+            .static-star, .flickering-star {
+                transition: opacity 1.2s ease-in-out;
+                background: var(--sn-star-color, #fff);
+            }
+            .static-star {
+                opacity: 0.5;
+            }
+            .flickering-star {
+                opacity: 1;
+                box-shadow: 0 0 6px var(--sn-star-color, #fff);
+            }
+            </style>
 CSS;
-            $starJs = <<<'JS'
+
+            $starJs = <<<JS
 <script>
 (function () {
-    const totalStars = 400;
-    const flickerCount = 80;
+    const totalStars = {$totalStars};
+    const flickerCount = {$flickerCount};
+    const flickerSpeed = {$flickerSpeed};
 
     function createContainerIfMissing() {
         let container = document.getElementById('starrynight-stars');
@@ -217,9 +335,7 @@ CSS;
 
     function initStars() {
         const container = createContainerIfMissing();
-
         if (container.dataset.ctInitialized === '1') return;
-
         container.innerHTML = '';
 
         const stars = [];
@@ -232,6 +348,7 @@ CSS;
             }
             return true;
         }
+        
         let attempts = 0;
         for (let i = 0; i < totalStars; i++) {
             let top, left, size;
@@ -241,6 +358,7 @@ CSS;
                 size = 1 + Math.random() * 2;
                 attempts++;
             } while (!isFarEnough(top, left, 2.5) && attempts < 1000);
+            
             starPositions.push({top, left});
             const star = document.createElement('div');
             star.style.position = 'absolute';
@@ -260,25 +378,24 @@ CSS;
                 star.classList.add('static-star');
             });
             const flickerIndices = new Set();
-            while (flickerIndices.size < flickerCount) {
-                flickerIndices.add(Math.floor(Math.random() * totalStars));
+            while (flickerIndices.size < flickerCount && flickerIndices.size < stars.length) {
+                flickerIndices.add(Math.floor(Math.random() * stars.length));
             }
             flickerIndices.forEach(idx => {
                 const star = stars[idx];
                 if (!star) return;
                 star.classList.remove('static-star');
                 star.classList.add('flickering-star');
-                star.style.animationDelay = (Math.random() * 2).toFixed(1) + 's';
-                star.style.animationDuration = (1.5 + Math.random() * 2).toFixed(1) + 's';
+                star.style.transitionDuration = (flickerSpeed / 1000).toFixed(1) + 's';
             });
         }
 
         if (window.__starrynight_stars_interval) {
             clearInterval(window.__starrynight_stars_interval);
         }
+        
         updateFlickeringStars();
-        window.__starrynight_stars_interval = setInterval(updateFlickeringStars, 3000);
-
+        window.__starrynight_stars_interval = setInterval(updateFlickeringStars, flickerSpeed);
         container.dataset.ctInitialized = '1';
     }
 
@@ -310,9 +427,7 @@ CSS;
 </script>
 JS;
 
-            return $meteorCss.$meteorHtml.$starDiv.$starStyle.$starJs;
+            return $bgCss.$customSettingsCss.$meteorCss.$meteorHtml.$starDiv.$starStyle.$starJs;
         });
     }
-
-    public function boot(Panel $panel): void {}
 }
